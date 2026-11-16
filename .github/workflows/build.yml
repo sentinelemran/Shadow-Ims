@@ -1,0 +1,82 @@
+name: Build Shadow Ims APK
+
+# রিপোর রুটে ShadowIms.zip push করলেই (নতুন বা আপডেট) এটা চলবে
+on:
+  push:
+    paths:
+      - "*.zip"
+      - ".github/workflows/build.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Unzip project
+        run: |
+          ZIP="ShadowIms.zip"
+          if [ ! -f "$ZIP" ]; then ZIP="$(ls -t *.zip 2>/dev/null | head -n 1)"; fi
+          if [ -z "$ZIP" ]; then echo "রিপোর রুটে কোনো .zip পাওয়া যায়নি"; exit 1; fi
+          echo "Using $ZIP"
+          rm -rf "$RUNNER_TEMP/proj" && mkdir -p "$RUNNER_TEMP/proj"
+          unzip -q "$ZIP" -d "$RUNNER_TEMP/proj"
+          SETTINGS="$(find "$RUNNER_TEMP/proj" -name 'settings.gradle.kts' -not -path '*/node_modules/*' | head -n 1)"
+          if [ -z "$SETTINGS" ]; then echo "zip-এর ভেতরে settings.gradle.kts নেই"; exit 1; fi
+          echo "PROJECT_DIR=$(dirname "$SETTINGS")" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install SDK packages
+        run: sdkmanager "platforms;android-36" "build-tools;35.0.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+
+      # ঐচ্ছিক: নিজের কী দিয়ে সাইন — Secrets: KEYSTORE_BASE64, KEYSTORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD
+      - name: Prepare signing key (optional)
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            echo "SIGNING_KEYSTORE_PATH=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+            echo "SIGNING_STORE_PASSWORD=$KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+            echo "SIGNING_KEY_ALIAS=$KEY_ALIAS" >> "$GITHUB_ENV"
+            echo "SIGNING_KEY_PASSWORD=$KEY_PASSWORD" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build release APK
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: gradle assembleRelease --stacktrace
+
+      - name: Collect APK
+        run: |
+          mkdir -p out
+          cp "$PROJECT_DIR"/app/build/outputs/apk/release/*.apk "out/ShadowIms-${{ github.run_number }}.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ShadowIms-apk
+          path: out/*.apk
+
+      # প্রতি বিল্ডে Releases-এ APK উঠবে, ফোন থেকে সরাসরি নামানো যাবে
+      - name: Publish Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: Shadow Ims build ${{ github.run_number }}
+          files: out/*.apk
