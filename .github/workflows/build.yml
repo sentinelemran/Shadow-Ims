@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
@@ -29,12 +29,14 @@ jobs:
           if [ -z "$SETTINGS" ]; then echo "zip-এর ভেতরে settings.gradle.kts নেই"; exit 1; fi
           echo "PROJECT_DIR=$(dirname "$SETTINGS")" >> "$GITHUB_ENV"
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
 
       - uses: android-actions/setup-android@v3
+        with:
+          packages: ""   # ডিফল্ট 'tools' প্যাকেজ এখন নেই, তাই খালি রাখা হলো
 
       - name: Install SDK packages
         run: sdkmanager "platforms;android-36" "build-tools;35.0.0"
